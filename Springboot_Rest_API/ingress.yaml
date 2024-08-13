@@ -1,0 +1,19 @@
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: sonarqube-sonarqube 
+  labels:
+    app: spring-boot-3-rest-api-example-master
+spec:
+  rules:
+    - host: qc.kshema.co
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: spring-boot-3-rest-api-example-master
+                port:
+                  number: 8080  

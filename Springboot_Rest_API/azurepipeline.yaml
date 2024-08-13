@@ -1,0 +1,142 @@
+trigger:
+- main
+pool:
+  name: 'Cms_Dev_Agentpool'  # Use the "ubuntu-latest" agent pool
+variables:
+  dockerRegistryServiceConnection: 'cms-dev-docker-service-connection'
+  imageRepository: 'springboot'
+  dockerfilePath: '$(Build.SourcesDirectory)/Dockerfile'
+  tag: '$(Build.BuildId)'  
+  secretName: 'cmssecret' 
+stages:
+- stage: Build
+  displayName: Build and publish stage
+  jobs:
+  - job: Build
+    displayName: Build job
+    steps:  
+    # - task: SonarQubePrepare@5
+    #   inputs:
+    #     SonarQube: 'cms-sonarqube-analysis'
+    #     scannerMode: 'Other'
+    #     extraProperties: |
+    #       # Additional properties that will be passed to the scanner,
+    #       # Put one key=value per line, example:
+    #       # sonar.exclusions=**/*.bin
+    #       sonar.projectKey=CMS_Springboot_Rest_API_b97b2589-cddb-4421-a939-a09136d01e2b
+    #       sonar.projectName=Springboot_Rest_API
+    - task: SonarQubePrepare@6
+      inputs:
+        SonarQube: 'cms-sonarqube-analysis'
+        scannerMode: 'Other'
+        extraProperties: |
+          # Additional properties that will be passed to the scanner,
+          # Put one key=value per line, example:
+          # sonar.exclusions=**/*.bin
+          sonar.projectKey=CMS_Springboot_Rest_API_e130badd-3813-46c3-9e82-b144ac2e8106
+          sonar.projectName=Springboot_Rest_API
+    # - task: JavaToolInstaller@0
+    #   inputs:
+    #     versionSpec: '21'
+    #     jdkArchitectureOption: 'x64'
+    #     jdkSourceOption: 'PreInstalled'
+
+    # - task: Maven@4
+    #   inputs:
+    #     #mavenPomFile: 'CMS_LOGIN_TEST/dummybot-example-saml-master/pom.xml'
+    #     mavenPomFile: 'spring-boot-3-rest-api-example-master/pom.xml' 
+    #     #mavenPomFile: 'Springboot_Rest_API/spring-boot-3-rest-api-example-master/pom.xml'
+    #     mavenOptions: '-Xmx3072m'
+    #     javaHomeOption: 'JDKVersion'
+    #     jdkVersionOption: '21'
+    #     jdkArchitectureOption: 'x64'
+    #     publishJUnitResults: true
+    #     testResultsFiles: '**/surefire-reports/TEST-*.xml'
+    #     goals: 'package'
+        
+    - task: Maven@4
+      inputs:
+        mavenPomFile: 'spring-boot-3-rest-api-example-master/pom.xml'
+        publishJUnitResults: true
+        testResultsFiles: '**/surefire-reports/TEST-*.xml'
+        javaHomeOption: 'JDKVersion'
+        mavenVersionOption: 'Default'
+        mavenAuthenticateFeed: false
+        effectivePomSkip: false
+        sonarQubeRunAnalysis: true
+        sqMavenPluginVersionChoice: 'latest'
+        goals: 'clean package'
+    - task: SonarQubePublish@6
+      inputs:
+        pollingTimeoutSec: '300'
+    - task: PublishTestResults@2
+      inputs:
+        testResultsFormat: 'JUnit'
+        testResultsFiles: '**/surefire-reports/TEST-*.xml'
+    - task: CopyFiles@2
+      inputs:
+        SourceFolder: '$(system.defaultworkingdirectory)'
+        Contents: '**/target/*.jar'
+        TargetFolder: '$(build.artifactstagingdirectory)'
+    - task: PublishBuildArtifacts@1
+      inputs:
+        PathtoPublish: '$(Build.ArtifactStagingDirectory)'
+        ArtifactName: 'drop'
+        publishLocation: 'Container'  
+    - task: DockerInstaller@0
+      inputs:
+        dockerVersion: '26.0.2'
+
+    - task: Docker@2
+      displayName: Build and publish image to Azure Container Registry
+      inputs:
+        command: buildAndPush
+        containerRegistry: $(dockerRegistryServiceConnection)
+        repository: $(imageRepository)
+        dockerfile: $(dockerfilePath)
+        tags: |
+          $(tag)  
+
+
+- stage: Deploy
+  displayName: Deploy to AKS
+  dependsOn: Build
+  condition: succeeded()
+  jobs:
+  - deployment: Deploy
+    displayName: Deploy to AKS
+    pool:
+      name: 'Cms_Dev_Agentpool'
+    environment: 'Dev'  # Update with your AKS environment with name
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          - checkout: self
+          - script: 
+               cd $(Build.SourcesDirectory) && ls
+          - task: KubernetesManifest@0
+            inputs:
+                action: 'createSecret'
+                kubernetesServiceConnection: 'Dev-AKS-Service-Connection'
+                namespace: 'dev'
+                secretType: 'dockerRegistry'
+                secretName: 'cmssecret'
+                dockerRegistryEndpoint: 'cms-dev-docker-service-connection'
+          - script: |
+              ls $(Build.SourcesDirectory)
+              sed -i 's/{{TAG_PLACEHOLDER}}/$(Build.BuildId)/g' $(System.DefaultWorkingDirectory)/deployement.yaml
+            displayName: 'Replace tag placeholder'
+          - task: KubernetesManifest@0
+            displayName: 'Deploy to AKS'
+            inputs:
+              action: 'deploy'
+              kubernetesServiceConnection: 'Dev-AKS-Service-Connection'  # Update with your Kubernetes service connection name
+              namespace: 'dev'
+              manifests: |
+                #$(Build.SourcesDirectory)/deployement.yaml 
+                $(System.DefaultWorkingDirectory)/deployement.yaml
+              #imagePullSecrets: |
+              #  - name: 'vamcmssecret'
+              # containers: |
+              #   $(containerRegistry)/$(imageRepository):$(tag)

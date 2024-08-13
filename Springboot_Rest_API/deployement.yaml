@@ -1,0 +1,40 @@
+# service type loadbalancer       
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: spring-boot-3-rest-api-example-master-svc
+spec:
+  ports:
+  - port: 80
+    targetPort: 8080
+    protocol: TCP
+    name: http
+  selector:
+    app: spring-boot-3-rest-api-example-master 
+ 
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: my-springboot-deployment
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: spring-boot-3-rest-api-example-master
+  template:
+    metadata:
+      labels:
+        app: spring-boot-3-rest-api-example-master
+    spec:
+      #imagePullSecrets:
+      #- name: vamcmssecret
+      containers:
+      - name: spring-boot-3-rest-api-example-master
+        #image: vamcmsqaacr.azurecr.io/spring-boot-3-rest-api-example-master:#{Build.BuildId}#
+        #image: vamcmsqaacr.azurecr.io/vamcmsqaacr:${Build.BuildId}
+        image: cmsacrfordev.azurecr.io/springboot:{{TAG_PLACEHOLDER}}
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 8080 
